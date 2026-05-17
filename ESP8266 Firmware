@@ -1,0 +1,215 @@
+#include <ESP8266WiFi.h>
+#include <PubSubClient.h>
+#include <Wire.h>
+
+// ---------------- WIFI ----------------
+const char* ssid = "HP";
+const char* password = "35404550";
+
+// ------------- MQTT SERVER -------------
+const char* mqtt_server = "192.168.137.1";
+
+// ------------ MQTT OBJECTS -------------
+WiFiClient espClient;
+PubSubClient client(espClient);
+
+// ------------- HTU21D ------------------
+#define HTU21D_ADDR 0x40
+#define TRIGGER_TEMP_MEASURE 0xE3
+#define TRIGGER_HUMD_MEASURE 0xE5
+
+// ----------- I2C PINS ------------------
+#define SDA_PIN 14   // D5
+#define SCL_PIN 12   // D6
+
+// ----------- MQ135 ---------------------
+#define MQ_PIN A0
+
+// ================= WIFI =================
+void setup() {
+
+  Serial.begin(115200);
+  delay(1000);
+
+  Serial.println("\nSystem Starting...");
+
+  Wire.begin(SDA_PIN, SCL_PIN);
+
+  // Sensor check
+  Wire.beginTransmission(HTU21D_ADDR);
+  if (Wire.endTransmission() == 0)
+    Serial.println("HTU21D Found");
+  else
+    Serial.println("HTU21D NOT Found");
+
+  // WIFI
+  WiFi.begin(ssid, password);
+
+  Serial.print("Connecting WiFi");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println("\nWiFi Connected");
+  Serial.println(WiFi.localIP());
+
+  client.setServer(mqtt_server, 1883);
+}
+
+// ================= MQTT =================
+void reconnect() {
+  while (!client.connected()) {
+    Serial.print("Connecting MQTT...");
+
+    if (client.connect("ESP8266Client")) {
+      Serial.println("Connected");
+    } else {
+      Serial.print("Failed rc=");
+      Serial.println(client.state());
+      delay(3000);
+    }
+  }
+}
+
+// ================= MQ135 AVG =================
+int readMQ135Avg(int samples = 10) {
+  long sum = 0;
+
+  for (int i = 0; i < samples; i++) {
+    sum += analogRead(MQ_PIN);
+    delay(5);
+  }
+
+  return sum / samples;
+}
+
+// ================= TEMP AVG =================
+float readTemperatureAvg(int samples = 5) {
+  float sum = 0;
+  int valid = 0;
+
+  for (int i = 0; i < samples; i++) {
+    float t = readTemperature();
+    if (!isnan(t)) {
+      sum += t;
+      valid++;
+    }
+    delay(50);
+  }
+
+  return (valid > 0) ? sum / valid : NAN;
+}
+
+// ================= HUMIDITY AVG =================
+float readHumidityAvg(int samples = 5) {
+  float sum = 0;
+  int valid = 0;
+
+  for (int i = 0; i < samples; i++) {
+    float h = readHumidity();
+    if (!isnan(h)) {
+      sum += h;
+      valid++;
+    }
+    delay(50);
+  }
+
+  return (valid > 0) ? sum / valid : NAN;
+}
+
+// ================= LOOP =================
+void loop() {
+
+  if (!client.connected()) reconnect();
+  client.loop();
+
+  // ----------- AVERAGED VALUES -----------
+  float temp = readTemperatureAvg(5);
+  float hum  = readHumidityAvg(5);
+
+  int mqValue = readMQ135Avg(10);
+  int gasLevel = map(mqValue, 0, 1023, 0, 100);
+
+  // ----------- VALIDATION -----------
+  if (isnan(temp) || isnan(hum)) {
+    Serial.println("Sensor Error");
+    return;
+  }
+
+  // ----------- SERIAL OUTPUT -----------
+  Serial.println("\n===== AVERAGED DATA =====");
+  Serial.print("Temperature: ");
+  Serial.println(temp);
+
+  Serial.print("Humidity: ");
+  Serial.println(hum);
+
+  Serial.print("MQ135 Raw Avg: ");
+  Serial.println(mqValue);
+
+  Serial.print("Gas Level %: ");
+  Serial.println(gasLevel);
+
+  // ----------- JSON PAYLOAD -----------
+  String payload = "{";
+  payload += "\"node\":\"Room-1\",";
+  payload += "\"temperature\":" + String(temp, 2) + ",";
+  payload += "\"humidity\":" + String(hum, 2) + ",";
+  payload += "\"mq135_raw\":" + String(mqValue) + ",";
+  payload += "\"gas_level\":" + String(gasLevel);
+  payload += "}";
+
+  // ----------- MQTT SEND -----------
+  client.publish("sensors/room1", payload.c_str());
+
+  Serial.println("\nMQTT Sent:");
+  Serial.println(payload);
+
+  delay(5000);
+}
+
+// ================= HTU21D TEMP =================
+float readTemperature() {
+
+  Wire.beginTransmission(HTU21D_ADDR);
+  Wire.write(TRIGGER_TEMP_MEASURE);
+
+  if (Wire.endTransmission() != 0) return NAN;
+
+  delay(60);
+  Wire.requestFrom(HTU21D_ADDR, 3);
+
+  if (Wire.available() < 3) return NAN;
+
+  uint16_t raw = Wire.read();
+  raw <<= 8;
+  raw |= Wire.read();
+  Wire.read();
+
+  raw &= 0xFFFC;
+
+  return -46.85 + (175.72 * raw / 65536.0);
+}
+
+// ================= HTU21D HUM =================
+float readHumidity() {
+
+  Wire.beginTransmission(HTU21D_ADDR);
+  Wire.write(TRIGGER_HUMD_MEASURE);
+
+  if (Wire.endTransmission() != 0) return NAN;
+
+  delay(60);
+  Wire.requestFrom(HTU21D_ADDR, 3);
+
+  if (Wire.available() < 3) return NAN;
+
+  uint16_t raw = Wire.read();
+  raw <<= 8;
+  raw |= Wire.read();
+  Wire.read();
+
+  raw &= 0xFFFC;
+  return -6.0 + (125.0 * raw / 65536.0);
+}
