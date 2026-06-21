@@ -1,0 +1,44 @@
+# mqtt_to_mysql.py 
+# Run: python mqtt_to_mysql.py 
+# Requires: pip install paho-mqtt mysql-connector-python 
+ 
+import paho.mqtt.client as mqtt 
+import json, mysql.connector 
+from datetime import datetime 
+ 
+BROKER = "192.168.137.1" 
+TOPIC  = "sensors/#" 
+ 
+db = mysql.connector.connect( 
+    host="localhost", user="root", 
+    password="", database="iot_system") 
+cursor = db.cursor() 
+ 
+def on_connect(client, userdata, flags, rc): 
+    print("Connected RC:", rc) 
+    client.subscribe(TOPIC) 
+ 
+def on_message(client, userdata, msg): 
+    print("RAW:", msg.payload.decode()) 
+    try: 
+        data = json.loads(msg.payload.decode()) 
+ node     = data.get("node", "Unknown") 
+        temp     = data.get("temperature", 0) 
+        hum      = data.get("humidity", 0) 
+        gaslevel = data.get("gas_level", data.get("mq135", 0)) 
+        sql = """INSERT INTO sensors 
+                 (node_name,temperature,humidity,gas_level,created_at) 
+                 VALUES (%s,%s,%s,%s,%s)""" 
+        cursor.execute(sql, (node, temp, hum, gaslevel, 
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"))) 
+        db.commit() 
+        print("Inserted into MySQL") 
+    except Exception as e: 
+        print("ERROR:", e) 
+ 
+client = mqtt.Client() 
+client.on_connect = on_connect 
+client.on_message = on_message 
+client.connect(BROKER, 1883, 60) 
+print("Waiting for MQTT data...") 
+client.loop_forever() 
