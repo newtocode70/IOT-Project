@@ -1,0 +1,5 @@
+# C:\MQTT\mosquitto.conf 
+listener 1883 
+allow_anonymous true 
+log_dest stdout 
+log_type all 
