@@ -1,0 +1,51 @@
+<?php 
+$conn = new mysqli("localhost","root","","iot_system"); 
+if ($conn->connect_error) die("DB Error"); 
+$latest = $conn->query("SELECT * FROM sensors ORDER BY id DESC LIMIT 1")->fetch_assoc(); 
+$rows   = $conn->query("SELECT * FROM sensors ORDER BY id DESC LIMIT 20"); 
+?> 
+<!DOCTYPE html><html><head> 
+  <title>IoT Dashboard</title> 
+  <meta http-equiv="refresh" content="3"> 
+  <style> 
+    body{margin:0;font-family:Arial;background:#0f172a;color:white} 
+    .header{background:#1e293b;padding:20px;text-align:center;font-size:28px;font-weight:bold} 
+    .cards{display:flex;justify-content:space-between;flex-wrap:wrap;margin:20px} 
+    .card{background:#334155;width:23%;padding:20px;border-radius:12px;text-align:center} 
+    .card h1{font-size:35px;margin-top:15px} 
+    .safe{color:lightgreen;font-weight:bold} 
+    .danger{color:red;font-weight:bold} 
+    table{width:100%;border-collapse:collapse;background:#1e293b;margin-top:20px} 
+    th{background:#334155;padding:15px} 
+    td{padding:12px;text-align:center;border-bottom:1px solid #475569} 
+  </style> 
+</head><body> 
+  <div class="header">ESP8266 IoT Monitoring Dashboard</div> 
+  <div class="cards"> 
+    <div class="card"><h3>Temperature</h3> 
+      <h1><?=$latest["temperature"]?> °C</h1></div> 
+    <div class="card"><h3>Humidity</h3> 
+      <h1><?=$latest["humidity"]?> %</h1></div> 
+    <div class="card"><h3>Gas Level</h3><h1> 
+      <?=$latest["gas_level"]?> %<br><br> 
+      <?php echo $latest["gas_level"]>70 
+        ? "<span class=danger>DANGER</span>" 
+        : "<span class=safe>SAFE</span>"; ?></h1></div> 
+    <div class="card"><h3>Node</h3> 
+      <h1><?=$latest["node_name"]?></h1></div> 
+  </div> 
+  <table> 
+    <tr><th>ID</th><th>Node</th><th>Temperature</th> 
+        <th>Humidity</th><th>Gas Level</th><th>Date & Time</th></tr> 
+    <?php while($r=$rows->fetch_assoc()): ?> 
+    <tr> 
+      <td><?=$r["id"]?></td><td><?=$r["node_name"]?></td> 
+      <td><?=$r["temperature"]?> °C</td> 
+      <td><?=$r["humidity"]?> %</td> 
+      <td class="<?=$r["gas_level"]>70?'danger':'safe'?>"> 
+          <?=$r["gas_level"]?> %</td> 
+      <td><?=$r["created_at"]?></td> 
+    </tr> 
+    <?php endwhile; ?> 
+  </table> 
+</body></html>
